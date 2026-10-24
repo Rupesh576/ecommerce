@@ -38,7 +38,6 @@ router.post('/signup', [
   const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
     expiresIn: '30d',
   });
-
   // 5. Send response
   res.status(201).json({
     _id: user._id,
