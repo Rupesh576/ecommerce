@@ -13,9 +13,9 @@ dotenv.config();
 connectDB();
 const app = express(); 
 
-// Middleware
-app.use(cors());              // Allow frontend to connect
-app.use(express.json());      // Parse JSON request bodies
+app.use(cors());                              // Allow frontend to connect
+app.use(express.json({ limit: '10mb' }));      // Parse JSON request bodies (allows image uploads)
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Test route - just to check if server works
 app.get('/', (req, res) => {
