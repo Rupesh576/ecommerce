@@ -21,7 +21,7 @@ const orderSchema = new mongoose.Schema({
       price: {
         type: Number,
         required: true, // snapshot of the product price at order time
-      },
+      }, 
     },
   ],
   totalAmount: {
