@@ -1,6 +1,8 @@
 const express = require('express');
+const mongoose = require('mongoose');
 const Cart = require('../models/Cart');
 const Order = require('../models/Order');
+const Product = require('../models/Product');
 const protect = require('../middleware/auth');
 const asyncHandler = require('../middleware/asyncHandler');
 
@@ -17,26 +19,52 @@ router.post('/', protect, asyncHandler(async (req, res) => {
     return res.status(400).json({ message: 'Cart is empty' });
   }
 
-  // Snapshot price at order time, in case product price changes later
-  const orderItems = cart.items.map((item) => ({
-    product: item.product._id,
-    quantity: item.quantity,
-    price: item.product.price,
-  }));
+  const session = await mongoose.startSession();
+  try {
+    let order;
 
-  const totalAmount = orderItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
+    await session.withTransaction(async () => {
+      // Reduce stock atomically per item: the stock >= quantity check and the
+      // decrement happen as one DB operation, so two concurrent checkouts
+      // can't both succeed against the same last unit.
+      for (const item of cart.items) {
+        const updatedProduct = await Product.findOneAndUpdate(
+          { _id: item.product._id, stock: { $gte: item.quantity } },
+          { $inc: { stock: -item.quantity } },
+          { new: true, session }
+        );
 
-  const order = await Order.create({
-    user: req.user._id,
-    items: orderItems,
-    totalAmount,
-  });
+        if (!updatedProduct) {
+          throw new Error(`Not enough stock for "${item.product.name}"`);
+        }
+      }
 
-  // Clear the cart after checkout
-  cart.items = [];
-  await cart.save();
+      // Snapshot price at order time, in case product price changes later
+      const orderItems = cart.items.map((item) => ({
+        product: item.product._id,
+        quantity: item.quantity,
+        price: item.product.price,
+      }));
 
-  res.status(201).json(order);
+      const totalAmount = orderItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
+
+      const created = await Order.create(
+        [{ user: req.user._id, items: orderItems, totalAmount }],
+        { session }
+      );
+      order = created[0];
+
+      // Clear the cart after checkout
+      cart.items = [];
+      await cart.save({ session });
+    });
+
+    res.status(201).json(order);
+  } catch (error) {
+    res.status(400).json({ message: error.message || 'Checkout failed' });
+  } finally {
+    session.endSession();
+  }
 }));
 
 // ============ MY ORDER HISTORY ============
